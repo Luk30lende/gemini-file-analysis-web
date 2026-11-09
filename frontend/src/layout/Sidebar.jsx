@@ -5,15 +5,34 @@ import {
   FileText,
   Clock,
   Settings,
-  ChevronLeft,
+  Trash2,
 } from "lucide-react";
 
-function Sidebar() {
-  const recentDocuments = [
-    { id: 1, name: "Research Paper.pdf", date: "Today" },
-    { id: 2, name: "Sales Report.csv", date: "Yesterday" },
-    { id: 3, name: "Project Proposal.docx", date: "2 days ago" },
-  ];
+function Sidebar({
+  history = [],
+  onSelectHistory,
+  onNewAnalysis,
+  onDeleteHistory,
+  activeHistoryId,
+}) {
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    const now = new Date();
+
+    if (Number.isNaN(date.getTime())) return "";
+
+    const isToday = date.toDateString() === now.toDateString();
+
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+
+    if (isToday) return "Today";
+    if (date.toDateString() === yesterday.toDateString()) {
+      return "Yesterday";
+    }
+
+    return date.toLocaleDateString();
+  };
 
   return (
     <aside className="sidebar">
@@ -30,7 +49,7 @@ function Sidebar() {
       </div>
 
       {/* New analysis button */}
-      <button className="new-analysis-btn">
+      <button className="new-analysis-btn" onClick={onNewAnalysis}>
         <Plus size={18} />
         <span>New Analysis</span>
       </button>
@@ -55,21 +74,49 @@ function Sidebar() {
         </a>
       </nav>
 
-      {/* Recent documents */}
+      {/* Recent analysis history */}
       <div className="recent-documents">
-        <p className="sidebar-label">RECENT DOCUMENTS</p>
+        <p className="sidebar-label">RECENT ANALYSES</p>
 
-        {recentDocuments.map((document) => (
-          <button className="recent-document" key={document.id}>
-            <FileText size={17} />
+        {history.length === 0 ? (
+          <p className="empty-history">
+            Your previous analyses will appear here.
+          </p>
+        ) : (
+          history.map((item) => (
+            <div
+              className={`recent-document ${
+                activeHistoryId === item.id ? "active" : ""
+              }`}
+              key={item.id}
+            >
+              <button
+                className="history-select-btn"
+                onClick={() => onSelectHistory(item)}
+                title={`Open analysis of ${item.filename}`}
+              >
+                <FileText size={17} />
 
-            <span className="document-info">
-              <span className="document-name">{document.name}</span>
+                <span className="document-info">
+                  <span className="document-name">{item.filename}</span>
 
-              <span className="document-date">{document.date}</span>
-            </span>
-          </button>
-        ))}
+                  <span className="document-date">
+                    {item.mode} · {formatDate(item.createdAt)}
+                  </span>
+                </span>
+              </button>
+
+              <button
+                className="delete-history-btn"
+                onClick={() => onDeleteHistory(item.id)}
+                title="Delete this analysis"
+                aria-label={`Delete analysis of ${item.filename}`}
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+          ))
+        )}
       </div>
 
       {/* Sidebar footer */}

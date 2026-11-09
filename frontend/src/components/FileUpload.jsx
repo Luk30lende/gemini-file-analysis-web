@@ -1,14 +1,14 @@
 import { useRef, useState } from "react";
 import { UploadCloud, FileText, X, CheckCircle2 } from "lucide-react";
 
-function FileUpload() {
+function FileUpload({ selectedFile, onFileSelect }) {
   const fileInputRef = useRef(null);
 
-  const [selectedFile, setSelectedFile] = useState(null);
   const [error, setError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
 
   const allowedExtensions = [".pdf", ".docx", ".txt", ".csv"];
+  const maxFileSize = 20 * 1024 * 1024; // 20 MB
 
   // Validate and select a file
   const handleFile = (file) => {
@@ -20,12 +20,24 @@ function FileUpload() {
 
     if (!allowedExtensions.includes(extension)) {
       setError("Unsupported file type. Please upload PDF, DOCX, TXT or CSV.");
-      setSelectedFile(null);
+      onFileSelect(null);
+      return;
+    }
+
+    if (file.size > maxFileSize) {
+      setError("File is too large. Maximum allowed size is 20 MB.");
+      onFileSelect(null);
+      return;
+    }
+
+    if (file.size === 0) {
+      setError("The selected file is empty.");
+      onFileSelect(null);
       return;
     }
 
     setError("");
-    setSelectedFile(file);
+    onFileSelect(file);
   };
 
   // Handle file picker
@@ -55,7 +67,7 @@ function FileUpload() {
 
   // Remove selected file
   const removeFile = () => {
-    setSelectedFile(null);
+    onFileSelect(null);
     setError("");
   };
 
