@@ -1,5 +1,11 @@
 import { useState } from "react";
-import { Sparkles, LoaderCircle, FileText, AlertCircle } from "lucide-react";
+import {
+  Sparkles,
+  LoaderCircle,
+  FileText,
+  AlertCircle,
+  Send,
+} from "lucide-react";
 
 import FileUpload from "./FileUpload";
 import AnalysisModes from "./AnalysisModes";
@@ -15,10 +21,16 @@ function WelcomeScreen({
   analysis,
   onAnalysisChange,
   onAnalysisComplete,
+  sessionId,
+  messages,
+  onMessagesChange,
 }) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState("");
   const [question, setQuestion] = useState("");
+
+  const [chatQuestion, setChatQuestion] = useState("");
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
 
   const handleAnalyze = async () => {
     if (!selectedFile) {
@@ -50,6 +62,7 @@ function WelcomeScreen({
       onAnalysisChange(data.analysis);
 
       onAnalysisComplete({
+        sessionId: data.session_id,
         filename: data.filename,
         mode: data.mode,
         question: selectedMode === "question" ? question : "",
@@ -60,6 +73,49 @@ function WelcomeScreen({
       setError(err.message || "Something went wrong. Please try again.");
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const handleSendMessage = async () => {
+    if (!chatQuestion.trim() || !sessionId || isSendingMessage) {
+      return;
+    }
+
+    const userQuestion = chatQuestion.trim();
+
+    setIsSendingMessage(true);
+    setError("");
+
+    try {
+      const response = await fetch("http://127.0.0.1:8000/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          question: userQuestion,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Could not send your message.");
+      }
+
+      onMessagesChange((previousMessages) => [
+        ...previousMessages,
+        { role: "user", text: userQuestion },
+        { role: "model", text: data.answer },
+      ]);
+
+      setChatQuestion("");
+    } catch (err) {
+      console.error("Chat error:", err);
+      setError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setIsSendingMessage(false);
     }
   };
 
@@ -167,6 +223,67 @@ function WelcomeScreen({
               {analysis}
             </ReactMarkdown>
           </div>
+        </div>
+      )}
+
+      {analysis && sessionId && (
+        <div className="chat-section">
+          <div className="chat-header">
+            <div>
+              <h2>Continue the conversation</h2>
+              <p>Ask follow-up questions about your document.</p>
+            </div>
+          </div>
+
+          <div className="chat-messages">
+            {messages.map((message, index) => (
+              <div
+                key={index}
+                className={`chat-message ${message.role === "user" ? "user-message" : "assistant-message"}`}
+              >
+                <span className="message-role">
+                  {message.role === "user" ? "You" : "Gemini"}
+                </span>
+
+                <div className="message-content">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {message.text}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            ))}
+
+            {isSendingMessage && (
+              <div className="chat-loading">
+                <LoaderCircle size={16} className="spin-icon" />
+                Gemini is thinking...
+              </div>
+            )}
+          </div>
+
+          <form
+            className="chat-input-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleSendMessage();
+            }}
+          >
+            <textarea
+              value={chatQuestion}
+              onChange={(event) => setChatQuestion(event.target.value)}
+              placeholder="Ask a follow-up question..."
+              rows={2}
+              disabled={isSendingMessage}
+            />
+
+            <button
+              type="submit"
+              disabled={!chatQuestion.trim() || isSendingMessage}
+            >
+              <Send size={17} />
+              Send
+            </button>
+          </form>
         </div>
       )}
 

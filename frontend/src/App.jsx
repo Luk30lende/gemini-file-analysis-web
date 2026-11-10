@@ -26,6 +26,8 @@ function App() {
   });
 
   const [activeHistoryId, setActiveHistoryId] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
+  const [messages, setMessages] = useState([]);
 
   // Check backend connection.
   useEffect(() => {
@@ -59,6 +61,7 @@ function App() {
   const handleAnalysisComplete = (result) => {
     const historyItem = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      sessionId: result.sessionId,
       filename: result.filename,
       mode: result.mode,
       question: result.question,
@@ -71,14 +74,41 @@ function App() {
     );
 
     setActiveHistoryId(historyItem.id);
+
+    setSessionId(result.sessionId);
+
+    setMessages([]);
   };
 
   // Open a previous analysis.
-  const handleSelectHistory = (item) => {
+  const handleSelectHistory = async (item) => {
     setAnalysis(item.analysis);
     setSelectedMode(item.mode);
     setSelectedFile(null);
     setActiveHistoryId(item.id);
+    setSessionId(item.sessionId || null);
+
+    if (!item.sessionId) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/chat/${item.sessionId}`,
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Could not retrieve conversation.");
+      }
+
+      // Skip the initial analysis prompt and response.
+      // The original analysis is already displayed separately.
+      setMessages(data.history.slice(2));
+    } catch (error) {
+      console.error("Conversation retrieval error:", error);
+    }
   };
 
   // Delete a history entry.
@@ -90,6 +120,7 @@ function App() {
     if (activeHistoryId === id) {
       setActiveHistoryId(null);
       setAnalysis("");
+      setSessionId(null);
     }
   };
 
@@ -99,6 +130,8 @@ function App() {
     setSelectedMode("summarize");
     setAnalysis("");
     setActiveHistoryId(null);
+    setSessionId(null);
+    setMessages([]);
   };
 
   return (
@@ -133,6 +166,9 @@ function App() {
           analysis={analysis}
           onAnalysisChange={setAnalysis}
           onAnalysisComplete={handleAnalysisComplete}
+          sessionId={sessionId}
+          messages={messages}
+          onMessagesChange={setMessages}
         />
       </main>
     </div>

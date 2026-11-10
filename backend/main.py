@@ -1,10 +1,16 @@
-
 import os
-from google import genai
+import uuid
+import tempfile
+
+from datetime import datetime, timezone
 from pathlib import Path
 
+from google import genai
+from google.genai import types
+from pydantic import BaseModel
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+
+from fastapi import FastAPI, File, HTTPException, UploadFile,Form
 from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
@@ -37,6 +43,13 @@ app.add_middleware(
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".csv"}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
+# Active conversation sessions
+conversation_sessions = {}
+
+# Follow-up question request model
+class ChatRequest(BaseModel):
+    session_id: str
+    question: str
 
 @app.get("/")
 async def root():
@@ -92,10 +105,6 @@ async def upload_file(file: UploadFile = File(...)):
         "size_kb": round(len(contents) / 1024, 2),
     }
 
-
-import tempfile
-
-from fastapi import Form
 
 
 SYSTEM_INSTRUCTIONS = """
@@ -246,7 +255,32 @@ async def analyze_document(
                 }
             )
 
+            # Create a new conversation session.
+            session_id = str(uuid.uuid4())
+
+            conversation_sessions[session_id] = {
+                "session_id": session_id,
+                "filename": file.filename,
+                "gemini_file": uploaded_file,
+                "history": [
+                    {
+                        "role": "user",
+                        "text": prompt
+                    },
+                    {
+                        "role": "model",
+                        "text": response.text
+                    }
+                ],
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+
+            # Transfer ownership of the Gemini file to the session.
+            # The file must remain available for follow-up questions.
+            uploaded_file = None
+
             return {
+                "session_id": session_id,
                 "filename": file.filename,
                 "mode": mode,
                 "analysis": response.text
@@ -275,3 +309,115 @@ async def analyze_document(
                 client.files.delete(name=uploaded_file.name)
             except Exception as cleanup_error:
                 print(f"Gemini file cleanup error: {cleanup_error}")
+
+
+@app.post("/api/chat")
+async def chat_with_document(request: ChatRequest):
+    if client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Gemini API key is not configured."
+        )
+
+    # Retrieve the conversation session.
+    session = conversation_sessions.get(request.session_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation session not found or expired."
+        )
+
+    question = request.question.strip()
+
+    if not question:
+        raise HTTPException(
+            status_code=400,
+            detail="Please enter a question."
+        )
+
+    try:
+        # Start with the original uploaded document.
+        contents = [session["gemini_file"]]
+
+        # Restore previous conversation messages.
+        for message in session["history"]:
+            contents.append(
+                types.Content(
+                    role=message["role"],
+                    parts=[
+                        types.Part.from_text(text=message["text"])
+                    ]
+                )
+            )
+
+        # Add the new question.
+        contents.append(
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(text=question)
+                ]
+            )
+        )
+
+        # Generate Gemini's response.
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=contents,
+            config={
+                "system_instruction": SYSTEM_INSTRUCTIONS
+            }
+        )
+
+        if not response.text:
+            raise HTTPException(
+                status_code=502,
+                detail="Gemini returned an empty response."
+            )
+
+        # Save the new conversation messages.
+        session["history"].append({
+            "role": "user",
+            "text": question
+        })
+
+        session["history"].append({
+            "role": "model",
+            "text": response.text
+        })
+
+        return {
+            "session_id": request.session_id,
+            "answer": response.text
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        print(f"Gemini chat error: {error}")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to process your question. Please try again."
+        )
+
+
+@app.get("/api/chat/{session_id}")
+async def get_conversation(session_id: str):
+    session = conversation_sessions.get(session_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation session not found or expired."
+        )
+
+    return {
+        "session_id": session["session_id"],
+        "filename": session["filename"],
+        "history": session["history"],
+        "created_at": session["created_at"]
+    }
+
